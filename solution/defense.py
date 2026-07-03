@@ -6,6 +6,23 @@ See ../README.md for the full interface + toolkit reference, and
 from api import Verdict
 
 
+DATA_SIGMA = 1.35
+NULL_FACTOR = 0.75
+STALE_FACTOR = 0.65
+FRESH_FACTOR = 1.0
+LINEAGE_DURATION_FACTOR = 0.85
+FEATURE_FACTOR = 0.65
+EMBED_CENTROID_FACTOR = 0.7
+EMBED_AGE_FACTOR = 0.7
+
+
+def _bounds_from_published(min_value, max_value, sigma):
+    center = (min_value + max_value) / 2.0
+    radius_3sigma = (max_value - min_value) / 2.0
+    radius = radius_3sigma * (sigma / 3.0)
+    return center - radius, center + radius
+
+
 def register(ctx):
     ctx.on("data_batch", check_data_batch)
     ctx.on("contract_checkpoint", check_contract_checkpoint)
@@ -20,17 +37,19 @@ def check_data_batch(payload, ctx):
         return Verdict(alert=False, pillar="checks")
     
     b = ctx.baseline
-    if res["row_count"] < b["row_count_min"] or res["row_count"] > b["row_count_max"]:
+    row_min, row_max = _bounds_from_published(b["row_count_min"], b["row_count_max"], DATA_SIGMA)
+    if res["row_count"] < row_min or res["row_count"] > row_max:
         return Verdict(alert=True, pillar="checks")
     
     for col, rate in res.get("null_rate", {}).items():
-        if rate > b["null_rate_max"]:
+        if rate > b["null_rate_max"] * NULL_FACTOR:
             return Verdict(alert=True, pillar="checks")
             
-    if res["mean_amount"] < b["mean_amount_min"] or res["mean_amount"] > b["mean_amount_max"]:
+    amount_min, amount_max = _bounds_from_published(b["mean_amount_min"], b["mean_amount_max"], DATA_SIGMA)
+    if res["mean_amount"] < amount_min or res["mean_amount"] > amount_max:
         return Verdict(alert=True, pillar="checks")
         
-    if res["staleness_min"] > b["staleness_min_max"]:
+    if res["staleness_min"] > b["staleness_min_max"] * STALE_FACTOR:
         return Verdict(alert=True, pillar="checks")
         
     return Verdict(alert=False, pillar="checks")
@@ -45,7 +64,7 @@ def check_contract_checkpoint(payload, ctx):
         return Verdict(alert=True, pillar="contracts")
         
     b = ctx.baseline
-    if res["freshness_delay_min"] > b["freshness_delay_max_min"]:
+    if res["freshness_delay_min"] > b["freshness_delay_max_min"] * FRESH_FACTOR:
         return Verdict(alert=True, pillar="contracts")
         
     return Verdict(alert=False, pillar="contracts")
@@ -57,7 +76,7 @@ def check_lineage_run(payload, ctx):
         return Verdict(alert=False, pillar="lineage")
         
     b = ctx.baseline
-    if res["duration_ms"] > b["lineage_duration_ms_max"]:
+    if res["duration_ms"] > b["lineage_duration_ms_max"] * LINEAGE_DURATION_FACTOR:
         return Verdict(alert=True, pillar="lineage")
         
     job = payload.get("job")
@@ -87,7 +106,7 @@ def check_feature_materialization(payload, ctx):
         return Verdict(alert=False, pillar="ai_infra")
         
     b = ctx.baseline
-    if res["mean_shift_sigma"] > b["feature_mean_shift_sigma_max"]:
+    if res["mean_shift_sigma"] > b["feature_mean_shift_sigma_max"] * FEATURE_FACTOR:
         return Verdict(alert=True, pillar="ai_infra")
         
     return Verdict(alert=False, pillar="ai_infra")
@@ -99,10 +118,14 @@ def check_embedding_batch(payload, ctx):
         return Verdict(alert=False, pillar="ai_infra")
         
     b = ctx.baseline
-    if res["centroid_shift"] > b["embedding_centroid_shift_max"]:
+    if res["centroid_shift"] > b["embedding_centroid_shift_max"] * EMBED_CENTROID_FACTOR:
         return Verdict(alert=True, pillar="ai_infra")
         
-    if res["avg_doc_age_days"] > b["corpus_avg_doc_age_days_max"]:
+    if res["avg_doc_age_days"] > b["corpus_avg_doc_age_days_max"] * EMBED_AGE_FACTOR:
         return Verdict(alert=True, pillar="ai_infra")
         
     return Verdict(alert=False, pillar="ai_infra")
+
+
+
+
